@@ -74,6 +74,19 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.nsis.zip
           if-no-files-found: warn
 
+      - name: Package portable exe (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          Compress-Archive -Path src-tauri/target/${{ matrix.target }}/release/eaa-tauri.exe -DestinationPath EAA_${{ github.ref_name }}_x64_portable.zip
+        shell: pwsh
+
+      - name: Upload portable exe
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-portable
+          path: EAA_*_portable.zip
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -91,4 +104,6 @@ jobs:
         with:
           draft: true
           generate_release_notes: true
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            artifacts/release-windows-portable/*
