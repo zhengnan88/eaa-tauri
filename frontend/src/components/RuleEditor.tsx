@@ -27,6 +27,7 @@ export default function RuleEditor({ rule, onClose, onSaved }: Props) {
     if (rule) {
       setForm({ ...rule })
       if (rule.feature_columns && rule.feature_columns.length > 0) {
+        setHeaders([...rule.feature_columns])
         setTemplateFile('已加载')
       }
     }
