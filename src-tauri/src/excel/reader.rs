@@ -1,7 +1,8 @@
 use std::path::Path;
-use calamine::{Reader, open_workbook, Data, CellErrorType};
+use std::fs::File;
+use std::io::BufReader;
+use calamine::{Reader, Data, CellErrorType, Xls, XlsOptions, open_workbook};
 
-/// Check if file is an Excel file by extension
 pub fn is_excel_file(file_path: &Path) -> bool {
     match file_path.extension().and_then(|e| e.to_str()) {
         Some(ext) => {
@@ -12,7 +13,6 @@ pub fn is_excel_file(file_path: &Path) -> bool {
     }
 }
 
-/// Convert a calamine Data value to string
 fn data_to_string(data: &Data) -> Option<String> {
     match data {
         Data::Empty => None,
@@ -26,10 +26,7 @@ fn data_to_string(data: &Data) -> Option<String> {
         }
         Data::Int(i) => Some(i.to_string()),
         Data::Bool(b) => Some(b.to_string()),
-        Data::DateTime(_) => {
-            // Use Display trait for DateTime formatting
-            Some(data.to_string())
-        }
+        Data::DateTime(_) => Some(data.to_string()),
         Data::DateTimeIso(s) => Some(s.clone()),
         Data::DurationIso(s) => Some(s.clone()),
         Data::Error(e) => {
@@ -47,8 +44,14 @@ fn data_to_string(data: &Data) -> Option<String> {
     }
 }
 
-/// Read headers from an Excel file
-/// Returns (headers, detected_row) where detected_row is 1-based
+fn open_xls_with_gbk(file_path: &str) -> Option<Xls<BufReader<File>>> {
+    let file = File::open(file_path).ok()?;
+    let reader = BufReader::new(file);
+    let mut options = XlsOptions::default();
+    options.force_codepage = Some(1200);
+    Xls::new_with_options(reader, options).ok()
+}
+
 pub fn read_headers(file_path: &str, feature_row: u32) -> Option<(Vec<String>, u32)> {
     let path = Path::new(file_path);
     if !path.exists() {
@@ -60,16 +63,25 @@ pub fn read_headers(file_path: &str, feature_row: u32) -> Option<(Vec<String>, u
         return None;
     }
 
-    let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
-    let sheet_names = workbook.sheet_names().to_owned();
-    let sheet_name = sheet_names.first()?;
-    let range = workbook.worksheet_range(sheet_name).ok()?;
+    let sheet_names;
+    let range;
+
+    if ext == "xls" {
+        let mut workbook = open_xls_with_gbk(file_path)?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    } else {
+        let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    }
 
     let start_row = (feature_row.max(1) - 1) as usize;
     let total_rows = range.height();
     let total_cols = range.width();
 
-    // Try to find a valid header row (start from feature_row, try up to 3 rows)
     for row_idx in start_row..(start_row + 3).min(total_rows) {
         let headers: Vec<String> = (0..total_cols)
             .filter_map(|col| {
@@ -83,7 +95,6 @@ pub fn read_headers(file_path: &str, feature_row: u32) -> Option<(Vec<String>, u
         }
     }
 
-    // Fallback: try row 0 if feature_row didn't work
     if start_row > 0 && total_rows > 0 {
         let headers: Vec<String> = (0..total_cols)
             .filter_map(|col| {
@@ -99,8 +110,6 @@ pub fn read_headers(file_path: &str, feature_row: u32) -> Option<(Vec<String>, u
     None
 }
 
-/// Read the first non-empty value from a specific column
-/// The column is identified by its header name in the first rows
 pub fn read_date_value(file_path: &str, column_name: &str) -> Option<String> {
     let path = Path::new(file_path);
     if !path.exists() || column_name.is_empty() {
@@ -112,10 +121,20 @@ pub fn read_date_value(file_path: &str, column_name: &str) -> Option<String> {
         return None;
     }
 
-    let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
-    let sheet_names = workbook.sheet_names().to_owned();
-    let sheet_name = sheet_names.first()?;
-    let range = workbook.worksheet_range(sheet_name).ok()?;
+    let sheet_names;
+    let range;
+
+    if ext == "xls" {
+        let mut workbook = open_xls_with_gbk(file_path)?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    } else {
+        let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    }
 
     let total_rows = range.height();
     let total_cols = range.width();
@@ -124,7 +143,6 @@ pub fn read_date_value(file_path: &str, column_name: &str) -> Option<String> {
         return None;
     }
 
-    // Find column index by searching header rows (rows 0-2)
     let mut col_idx = None;
     for row in 0..3.min(total_rows) {
         for col in 0..total_cols {
@@ -142,7 +160,6 @@ pub fn read_date_value(file_path: &str, column_name: &str) -> Option<String> {
 
     let col = col_idx?;
 
-    // Read first non-empty value from that column (skip header rows)
     for row in 1..total_rows {
         if let Some(s) = range.get((row, col)).and_then(|d| data_to_string(d)) {
             if !s.trim().is_empty() {
@@ -154,7 +171,6 @@ pub fn read_date_value(file_path: &str, column_name: &str) -> Option<String> {
     None
 }
 
-/// Get file info (row count, column count, file size)
 pub fn get_file_info(file_path: &str) -> Option<(usize, usize, u64)> {
     let path = Path::new(file_path);
     if !path.exists() {
@@ -168,10 +184,20 @@ pub fn get_file_info(file_path: &str) -> Option<(usize, usize, u64)> {
         return None;
     }
 
-    let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
-    let sheet_names = workbook.sheet_names().to_owned();
-    let sheet_name = sheet_names.first()?;
-    let range = workbook.worksheet_range(sheet_name).ok()?;
+    let sheet_names;
+    let range;
+
+    if ext == "xls" {
+        let mut workbook = open_xls_with_gbk(file_path)?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    } else {
+        let mut workbook: calamine::Xlsx<_> = open_workbook(file_path).ok()?;
+        sheet_names = workbook.sheet_names().to_owned();
+        let sheet_name = sheet_names.first()?;
+        range = workbook.worksheet_range(sheet_name).ok()?;
+    }
 
     Some((range.height(), range.width(), file_size))
 }
