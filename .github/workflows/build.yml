@@ -53,12 +53,15 @@ jobs:
         run: npm install
         working-directory: frontend
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tauriScript: npx tauri
+          tauriScript: cargo tauri
           args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
