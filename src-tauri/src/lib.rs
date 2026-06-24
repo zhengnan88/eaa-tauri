@@ -145,4 +145,81 @@ mod tests {
         assert_eq!(results.len(), 3, "Should have 3 results");
         assert!(results.iter().all(|r| r.success), "All archives should succeed");
     }
+
+    #[test]
+    fn test_read_order_detail_headers() {
+        let files = [
+            "/Volumes/WenshuSpace/下载/订单详情_20260416_103708_8.xls",
+            "/Volumes/WenshuSpace/下载/订单详情_20260109_112137_6.xls",
+        ];
+        for file in &files {
+            println!("\n=== {} ===", file);
+            let result = crate::excel::reader::read_headers(file, 1);
+            match result {
+                Some((headers, row)) => {
+                    println!("Detected row: {}", row);
+                    println!("Headers ({}): {:?}", headers.len(), headers);
+                    
+                    let rule_cols = vec!["订单号", "运单号", "商家流水号", "商家名称", "商家ID", "城市", "骑手", "骑手ID", "站点", "站点ID"];
+                    for col in &rule_cols {
+                        if headers.iter().any(|h| h == col) {
+                            println!("  ✓ {}", col);
+                        } else {
+                            println!("  ✗ {} - MISSING", col);
+                        }
+                    }
+                }
+                None => println!("Failed to read headers"),
+            }
+        }
+    }
 }
+
+    #[test]
+    fn test_order_detail_rule_match() {
+        use crate::core::config::{Rule, AppSettings};
+        
+        let rule_cols = vec![
+            "订单号", "运单号", "商家流水号", "商家名称", "商家ID", "城市", "骑手", "骑手ID", "站点", "站点ID",
+            "区域", "重量", "预订单", "状态", "组织类型", "众包类型", "配送时效", "等待时长", "送达时长", "连击时长",
+            "导航距离", "折线距离", "商家地址", "商家配送评分", "商家配送评价", "订单原价", "订单金额", "付商家款", "实际付款", "收用户款",
+            "实际收款", "配送费", "下单时间", "支付时间", "期望送达时间", "商家推单时间", "调度时间", "接单时间", "到店时间", "取货时间",
+            "送达时间", "取消时间", "取消原因", "取消操作人", "申请退款原因", "申请退款操作人", "驻点订单类型", "业务类型", "是否跨区单", "是否乐跑单",
+            "商户点击出餐时间", "最早考核时间", "最晚考核时间", "增值服务产品", "骑手签约站点", "取件AOI名称", "送件AOI名称",
+        ];
+        
+        let rule = Rule {
+            id: "test".to_string(),
+            name: "订单详情".to_string(),
+            feature_columns: rule_cols.into_iter().map(String::from).collect(),
+            feature_row: 1,
+            date_column: String::new(),
+            force_precision: "day".to_string(),
+            naming_pattern: String::new(),
+            auto_archive: true,
+        };
+        
+        let settings = AppSettings {
+            ignore_case: true,
+            ignore_space: true,
+            log_retention_days: 30,
+        };
+        
+        let file = "/Volumes/WenshuSpace/下载/订单详情_20260416_103708_8.xls";
+        let (headers, _) = crate::excel::reader::read_headers(file, 1).unwrap();
+        
+        let matched = crate::core::rule_engine::rule_matches(&rule, &headers, &settings);
+        println!("Rule matches: {}", matched);
+        
+        if !matched {
+            let normalized_headers: Vec<String> = headers.iter()
+                .map(|h| crate::core::rule_engine::normalize_column(h, true, true))
+                .collect();
+            for col in &rule.feature_columns {
+                let normalized_col = crate::core::rule_engine::normalize_column(col, true, true);
+                if !normalized_headers.contains(&normalized_col) {
+                    println!("  MISSING: '{}' (normalized: '{}')", col, normalized_col);
+                }
+            }
+        }
+    }
